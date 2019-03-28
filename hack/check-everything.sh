@@ -19,7 +19,7 @@ set -e
 hack_dir=$(dirname ${BASH_SOURCE})
 source ${hack_dir}/common.sh
 
-k8s_version=1.12.6
+k8s_version=1.12.3
 goarch=amd64
 goos="unknown"
 
