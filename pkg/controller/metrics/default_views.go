@@ -29,6 +29,7 @@ var (
 	// ViewReconcileTotal counts ReconcileTotal with Controller and Result tags.
 	ViewReconcileTotal = view.View{
 		Name:        "controller_runtime_reconcile_total",
+		Description: "Total number of reconciliations per controller",
 		Measure:     MeasureReconcileTotal,
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{TagController, TagResult},
@@ -37,6 +38,7 @@ var (
 	// ViewReconcileError counts ReconcileError with a Controller tag.
 	ViewReconcileError = view.View{
 		Name:        "controller_runtime_reconcile_errors_total",
+		Description: "Total number of reconciliation errors per controller",
 		Measure:     MeasureReconcileErrors,
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{TagController},
@@ -44,6 +46,7 @@ var (
 	// ViewReconcileTime is a histogram of ReconcileTime with a Controller tag.
 	ViewReconcileTime = view.View{
 		Name:        "controller_runtime_reconcile_time_seconds",
+		Description: "Length of time per reconciliation per controller",
 		Measure:     MeasureReconcileTime,
 		Aggregation: DefaultPrometheusDistribution,
 		TagKeys:     []tag.Key{TagController},
