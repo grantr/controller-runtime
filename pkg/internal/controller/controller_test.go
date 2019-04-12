@@ -409,33 +409,7 @@ var _ = Describe("controller", func() {
 			// TODO(community): write this test
 		})
 
-		// ExpectEmptyView := func(viewName string) {
-		// 	Expect(func() error {
-		// 		rows, err := view.RetrieveData(viewName)
-		// 		if err != nil {
-		// 			return err
-		// 		}
-		// 		if len(rows) > 0 {
-		// 			return fmt.Errorf("View %s has data, expected none", viewName)
-		// 		}
-		// 		return nil
-		// 	}()).Should(Succeed())
-		// }
-
 		Context("Measure reconcile_total", func() {
-			// BeforeEach(func() {
-			// 	view.Register(&view.View{
-			// 		Name:        metrics.MeasureReconcileTotal.Name(),
-			// 		Measure:     metrics.MeasureReconcileTotal,
-			// 		Aggregation: view.Count(),
-			// 		TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
-			// 	})
-			// })
-
-			// AfterEach(func() {
-			// 	view.Unregister(view.Find(metrics.MeasureReconcileTotal.Name()))
-			// })
-
 			It("should get updated on successful reconciliation", func(done Done) {
 				view.Register(&view.View{
 					Name:        "successful_reconciliation",
@@ -443,7 +417,6 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
-				//ExpectEmptyView(metrics.MeasureReconcileTotal.Name())
 
 				go func() {
 					defer GinkgoRecover()
@@ -464,6 +437,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
+				view.Unregister(view.Find("successful_reconciliation"))
 
 				close(done)
 			}, 2.0)
@@ -475,16 +449,6 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
-				// Expect(func() error {
-				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-				// 	if err != nil {
-				// 		return err
-				// 	}
-				// 	if len(rows) > 0 {
-				// 		return fmt.Errorf("OpenCensus View has data, expected none")
-				// 	}
-				// 	return nil
-				// }()).Should(Succeed())
 
 				fakeReconcile.Err = fmt.Errorf("expected error: reconcile")
 				go func() {
@@ -506,6 +470,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
+				view.Unregister(view.Find("total_reconcile_error"))
 
 				close(done)
 			}, 2.0)
@@ -517,16 +482,6 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
-				// Expect(func() error {
-				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-				// 	if err != nil {
-				// 		return err
-				// 	}
-				// 	if len(rows) > 0 {
-				// 		return fmt.Errorf("OpenCensus View has data, expected none")
-				// 	}
-				// 	return nil
-				// }()).Should(Succeed())
 
 				fakeReconcile.Result.Requeue = true
 				go func() {
@@ -548,6 +503,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
+				view.Unregister(view.Find("reconcile_retry"))
 
 				close(done)
 			}, 2.0)
@@ -559,16 +515,6 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
-				// Expect(func() error {
-				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-				// 	if err != nil {
-				// 		return err
-				// 	}
-				// 	if len(rows) > 0 {
-				// 		return fmt.Errorf("OpenCensus View has data, expected none")
-				// 	}
-				// 	return nil
-				// }()).Should(Succeed())
 
 				fakeReconcile.Result.RequeueAfter = 5 * time.Hour
 				go func() {
@@ -590,24 +536,13 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
+				view.Unregister(view.Find("reconcile_retry_after"))
 
 				close(done)
 			}, 2.0)
 		})
 
 		Context("Measure reconcile_errors", func() {
-			// BeforeEach(func() {
-			// 	view.Register(&view.View{
-			// 		Name:        metrics.MeasureReconcileErrors.Name(),
-			// 		Measure:     metrics.MeasureReconcileErrors,
-			// 		Aggregation: view.Count(),
-			// 		TagKeys:     []tag.Key{metrics.TagController},
-			// 	})
-			// })
-
-			// AfterEach(func() {
-			// 	view.Unregister(view.Find(metrics.MeasureReconcileErrors.Name()))
-			// })
 
 			It("should get updated on reconcile errors", func(done Done) {
 				view.Register(&view.View{
@@ -616,16 +551,6 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController},
 				})
-				// Expect(func() error {
-				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileErrors.Name())
-				// 	if err != nil {
-				// 		return err
-				// 	}
-				// 	if len(rows) > 0 {
-				// 		return fmt.Errorf("OpenCensus View has data, expected none")
-				// 	}
-				// 	return nil
-				// }()).Should(Succeed())
 
 				fakeReconcile.Err = fmt.Errorf("expected error: reconcile")
 				go func() {
@@ -668,25 +593,13 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}()).Should(Succeed())
+				view.Unregister(view.Find("reconcile_errors"))
 
 				close(done)
 			}, 2.0)
 		})
 
 		Context("Measure reconcile_time", func() {
-			// BeforeEach(func() {
-			// 	view.Register(&view.View{
-			// 		Name:        metrics.MeasureReconcileTime.Name(),
-			// 		Measure:     metrics.MeasureReconcileTime,
-			// 		Aggregation: view.Count(),
-			// 		TagKeys:     []tag.Key{metrics.TagController},
-			// 	})
-			// })
-
-			// AfterEach(func() {
-			// 	view.Unregister(view.Find(metrics.MeasureReconcileTime.Name()))
-			// })
-
 			It("should add a reconcile time to the reconcile time histogram", func(done Done) {
 				view.Register(&view.View{
 					Name:        "reconcile_time",
@@ -694,7 +607,6 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController},
 				})
-				//ExpectEmptyView(metrics.MeasureReconcileTime.Name())
 
 				go func() {
 					defer GinkgoRecover()
@@ -718,6 +630,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
+				view.Unregister(view.Find("reconcile_time"))
 
 				close(done)
 			}, 4.0)
