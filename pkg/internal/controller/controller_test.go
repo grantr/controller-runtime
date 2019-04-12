@@ -22,8 +22,6 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	appsv1 "k8s.io/api/apps/v1"
@@ -35,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/controller/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/internal/controller/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile/reconciletest"
@@ -64,6 +61,8 @@ var _ = Describe("controller", func() {
 		}
 		informers = &informertest.FakeInformers{}
 		ctrl = &Controller{
+			// Why isn't Name set here? It's documented as required.
+			Name: "foo",
 			MaxConcurrentReconciles: 1,
 			Do:    fakeReconcile,
 			Queue: queue,
@@ -410,31 +409,41 @@ var _ = Describe("controller", func() {
 			// TODO(community): write this test
 		})
 
-		Context("Metric reconcile_total", func() {
-			BeforeEach(func() {
+		// ExpectEmptyView := func(viewName string) {
+		// 	Expect(func() error {
+		// 		rows, err := view.RetrieveData(viewName)
+		// 		if err != nil {
+		// 			return err
+		// 		}
+		// 		if len(rows) > 0 {
+		// 			return fmt.Errorf("View %s has data, expected none", viewName)
+		// 		}
+		// 		return nil
+		// 	}()).Should(Succeed())
+		// }
+
+		Context("Measure reconcile_total", func() {
+			// BeforeEach(func() {
+			// 	view.Register(&view.View{
+			// 		Name:        metrics.MeasureReconcileTotal.Name(),
+			// 		Measure:     metrics.MeasureReconcileTotal,
+			// 		Aggregation: view.Count(),
+			// 		TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
+			// 	})
+			// })
+
+			// AfterEach(func() {
+			// 	view.Unregister(view.Find(metrics.MeasureReconcileTotal.Name()))
+			// })
+
+			It("should get updated on successful reconciliation", func(done Done) {
 				view.Register(&view.View{
-					Name:        metrics.MeasureReconcileTotal.Name(),
+					Name:        "successful_reconciliation",
 					Measure:     metrics.MeasureReconcileTotal,
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
-			})
-
-			AfterEach(func() {
-				view.Unregister(view.Find(metrics.MeasureReconcileTotal.Name()))
-			})
-
-			It("should get updated on successful reconciliation", func(done Done) {
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-					if err != nil {
-						return err
-					}
-					if len(rows) > 0 {
-						return fmt.Errorf("OpenCensus View has data, expected none")
-					}
-					return nil
-				}()).Should(Succeed())
+				//ExpectEmptyView(metrics.MeasureReconcileTotal.Name())
 
 				go func() {
 					defer GinkgoRecover()
@@ -444,31 +453,38 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				Eventually(func() error {
+					rows, err := view.RetrieveData("successful_reconciliation")
 					if err != nil {
 						return err
 					}
 					Expect(rows).To(HaveLen(1))
 					Expect(rows[0].Data).To(Equal(&view.CountData{Value: 1}))
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagResult, Value: "success"}))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
-				}()).Should(Succeed())
+				}, 2.0).Should(Succeed())
 
 				close(done)
 			}, 2.0)
 
 			It("should get updated on reconcile errors", func(done Done) {
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-					if err != nil {
-						return err
-					}
-					if len(rows) > 0 {
-						return fmt.Errorf("OpenCensus View has data, expected none")
-					}
-					return nil
-				}()).Should(Succeed())
+				view.Register(&view.View{
+					Name:        "total_reconcile_error",
+					Measure:     metrics.MeasureReconcileTotal,
+					Aggregation: view.Count(),
+					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
+				})
+				// Expect(func() error {
+				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	if len(rows) > 0 {
+				// 		return fmt.Errorf("OpenCensus View has data, expected none")
+				// 	}
+				// 	return nil
+				// }()).Should(Succeed())
 
 				fakeReconcile.Err = fmt.Errorf("expected error: reconcile")
 				go func() {
@@ -479,31 +495,38 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				Eventually(func() error {
+					rows, err := view.RetrieveData("total_reconcile_error")
 					if err != nil {
 						return err
 					}
 					Expect(rows).To(HaveLen(1))
 					Expect(rows[0].Data).To(Equal(&view.CountData{Value: 1}))
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagResult, Value: "error"}))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
-				}()).Should(Succeed())
+				}, 2.0).Should(Succeed())
 
 				close(done)
 			}, 2.0)
 
 			It("should get updated when reconcile returns with retry enabled", func(done Done) {
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-					if err != nil {
-						return err
-					}
-					if len(rows) > 0 {
-						return fmt.Errorf("OpenCensus View has data, expected none")
-					}
-					return nil
-				}()).Should(Succeed())
+				view.Register(&view.View{
+					Name:        "reconcile_retry",
+					Measure:     metrics.MeasureReconcileTotal,
+					Aggregation: view.Count(),
+					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
+				})
+				// Expect(func() error {
+				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	if len(rows) > 0 {
+				// 		return fmt.Errorf("OpenCensus View has data, expected none")
+				// 	}
+				// 	return nil
+				// }()).Should(Succeed())
 
 				fakeReconcile.Result.Requeue = true
 				go func() {
@@ -514,31 +537,38 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				Eventually(func() error {
+					rows, err := view.RetrieveData("reconcile_retry")
 					if err != nil {
 						return err
 					}
 					Expect(rows).To(HaveLen(1))
 					Expect(rows[0].Data).To(Equal(&view.CountData{Value: 1}))
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagResult, Value: "requeue"}))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
-				}()).Should(Succeed())
+				}, 2.0).Should(Succeed())
 
 				close(done)
 			}, 2.0)
 
 			It("should get updated when reconcile returns with retryAfter enabled", func(done Done) {
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
-					if err != nil {
-						return err
-					}
-					if len(rows) > 0 {
-						return fmt.Errorf("OpenCensus View has data, expected none")
-					}
-					return nil
-				}()).Should(Succeed())
+				view.Register(&view.View{
+					Name:        "reconcile_retry_after",
+					Measure:     metrics.MeasureReconcileTotal,
+					Aggregation: view.Count(),
+					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
+				})
+				// Expect(func() error {
+				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	if len(rows) > 0 {
+				// 		return fmt.Errorf("OpenCensus View has data, expected none")
+				// 	}
+				// 	return nil
+				// }()).Should(Succeed())
 
 				fakeReconcile.Result.RequeueAfter = 5 * time.Hour
 				go func() {
@@ -549,32 +579,53 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				Expect(func() error {
-					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
+				Eventually(func() error {
+					rows, err := view.RetrieveData("reconcile_retry_after")
 					if err != nil {
 						return err
 					}
 					Expect(rows).To(HaveLen(1))
 					Expect(rows[0].Data).To(Equal(&view.CountData{Value: 1}))
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagResult, Value: "requeue_after"}))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
-				}()).Should(Succeed())
+				}, 2.0).Should(Succeed())
 
 				close(done)
 			}, 2.0)
 		})
 
-		Context("should update Prometheus metrics", func() {
-			It("should requeue a Request if there is an error and continue processing items", func(done Done) {
-				var reconcileErrs dto.Metric
-				ctrlmetrics.ReconcileErrors.Reset()
-				Expect(func() error {
-					ctrlmetrics.ReconcileErrors.WithLabelValues(ctrl.Name).Write(&reconcileErrs)
-					if reconcileErrs.GetCounter().GetValue() != 0.0 {
-						return fmt.Errorf("metric reconcile errors not reset")
-					}
-					return nil
-				}()).Should(Succeed())
+		Context("Measure reconcile_errors", func() {
+			// BeforeEach(func() {
+			// 	view.Register(&view.View{
+			// 		Name:        metrics.MeasureReconcileErrors.Name(),
+			// 		Measure:     metrics.MeasureReconcileErrors,
+			// 		Aggregation: view.Count(),
+			// 		TagKeys:     []tag.Key{metrics.TagController},
+			// 	})
+			// })
+
+			// AfterEach(func() {
+			// 	view.Unregister(view.Find(metrics.MeasureReconcileErrors.Name()))
+			// })
+
+			It("should get updated on reconcile errors", func(done Done) {
+				view.Register(&view.View{
+					Name:        "reconcile_errors",
+					Measure:     metrics.MeasureReconcileErrors,
+					Aggregation: view.Count(),
+					TagKeys:     []tag.Key{metrics.TagController},
+				})
+				// Expect(func() error {
+				// 	rows, err := view.RetrieveData(metrics.MeasureReconcileErrors.Name())
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	if len(rows) > 0 {
+				// 		return fmt.Errorf("OpenCensus View has data, expected none")
+				// 	}
+				// 	return nil
+				// }()).Should(Succeed())
 
 				fakeReconcile.Err = fmt.Errorf("expected error: reconcile")
 				go func() {
@@ -589,10 +640,13 @@ var _ = Describe("controller", func() {
 				By("Invoking Reconciler which will give an error")
 				Expect(<-reconciled).To(Equal(request))
 				Eventually(func() error {
-					ctrlmetrics.ReconcileErrors.WithLabelValues(ctrl.Name).Write(&reconcileErrs)
-					if reconcileErrs.GetCounter().GetValue() != 1.0 {
-						return fmt.Errorf("metrics not updated")
+					rows, err := view.RetrieveData("reconcile_errors")
+					if err != nil {
+						return err
 					}
+					Expect(rows).To(HaveLen(1))
+					Expect(rows[0].Data).To(Equal(&view.CountData{Value: 1}))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
 
@@ -604,22 +658,43 @@ var _ = Describe("controller", func() {
 				Eventually(ctrl.Queue.Len).Should(Equal(0))
 				Eventually(func() int { return ctrl.Queue.NumRequeues(request) }).Should(Equal(0))
 
-				close(done)
-			}, 2.0)
-
-			It("should add a reconcile time to the reconcile time histogram", func(done Done) {
-				var reconcileTime dto.Metric
-				ctrlmetrics.ReconcileTime.Reset()
-
 				Expect(func() error {
-					histObserver := ctrlmetrics.ReconcileTime.WithLabelValues(ctrl.Name)
-					hist := histObserver.(prometheus.Histogram)
-					hist.Write(&reconcileTime)
-					if reconcileTime.GetHistogram().GetSampleCount() != uint64(0) {
-						return fmt.Errorf("metrics not reset")
+					rows, err := view.RetrieveData("reconcile_errors")
+					if err != nil {
+						return err
 					}
+					Expect(rows).To(HaveLen(1))
+					Expect(rows[0].Data).To(Equal(&view.CountData{Value: 1}))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}()).Should(Succeed())
+
+				close(done)
+			}, 2.0)
+		})
+
+		Context("Measure reconcile_time", func() {
+			// BeforeEach(func() {
+			// 	view.Register(&view.View{
+			// 		Name:        metrics.MeasureReconcileTime.Name(),
+			// 		Measure:     metrics.MeasureReconcileTime,
+			// 		Aggregation: view.Count(),
+			// 		TagKeys:     []tag.Key{metrics.TagController},
+			// 	})
+			// })
+
+			// AfterEach(func() {
+			// 	view.Unregister(view.Find(metrics.MeasureReconcileTime.Name()))
+			// })
+
+			It("should add a reconcile time to the reconcile time histogram", func(done Done) {
+				view.Register(&view.View{
+					Name:        "reconcile_time",
+					Measure:     metrics.MeasureReconcileTime,
+					Aggregation: view.Count(),
+					TagKeys:     []tag.Key{metrics.TagController},
+				})
+				//ExpectEmptyView(metrics.MeasureReconcileTime.Name())
 
 				go func() {
 					defer GinkgoRecover()
@@ -635,12 +710,12 @@ var _ = Describe("controller", func() {
 				Eventually(func() int { return ctrl.Queue.NumRequeues(request) }).Should(Equal(0))
 
 				Eventually(func() error {
-					histObserver := ctrlmetrics.ReconcileTime.WithLabelValues(ctrl.Name)
-					hist := histObserver.(prometheus.Histogram)
-					hist.Write(&reconcileTime)
-					if reconcileTime.GetHistogram().GetSampleCount() == uint64(0) {
-						return fmt.Errorf("metrics not updated")
+					rows, err := view.RetrieveData("reconcile_time")
+					if err != nil {
+						return err
 					}
+					Expect(rows).To(HaveLen(1))
+					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
 
