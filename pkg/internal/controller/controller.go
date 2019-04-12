@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/internal/controller/metrics"
 	logf "sigs.k8s.io/controller-runtime/pkg/internal/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -187,8 +186,7 @@ func (c *Controller) processNextWorkItem() bool {
 	reconcileStartTS := time.Now()
 	defer func() {
 		reconcileTime := time.Now().Sub(reconcileStartTS)
-		c.updatePromMetrics(reconcileTime)
-		c.updateOCMetrics(metricsCtx, reconcileTime)
+		c.updateMetrics(metricsCtx, reconcileTime)
 	}()
 
 	obj, shutdown := c.Queue.Get()
@@ -232,19 +230,15 @@ func (c *Controller) processNextWorkItem() bool {
 	if result, err := c.Do.Reconcile(req); err != nil {
 		c.Queue.AddRateLimited(req)
 		log.Error(err, "Reconciler error", "controller", c.Name, "request", req)
-		ctrlmetrics.ReconcileErrors.WithLabelValues(c.Name).Inc()
-		ctrlmetrics.ReconcileTotal.WithLabelValues(c.Name, "error").Inc()
 		stats.Record(metricsCtx, metrics.MeasureReconcileErrors.M(1))
 		metricsCtx, _ = tag.New(metricsCtx, tag.Insert(metrics.TagResult, "error"))
 		return false
 	} else if result.RequeueAfter > 0 {
 		c.Queue.AddAfter(req, result.RequeueAfter)
-		ctrlmetrics.ReconcileTotal.WithLabelValues(c.Name, "requeue_after").Inc()
 		metricsCtx, _ = tag.New(metricsCtx, tag.Insert(metrics.TagResult, "requeue_after"))
 		return true
 	} else if result.Requeue {
 		c.Queue.AddRateLimited(req)
-		ctrlmetrics.ReconcileTotal.WithLabelValues(c.Name, "requeue").Inc()
 		metricsCtx, _ = tag.New(metricsCtx, tag.Insert(metrics.TagResult, "requeue"))
 
 		return true
@@ -257,7 +251,6 @@ func (c *Controller) processNextWorkItem() bool {
 	// TODO(directxman12): What does 1 mean?  Do we want level constants?  Do we want levels at all?
 	log.V(1).Info("Successfully Reconciled", "controller", c.Name, "request", req)
 
-	ctrlmetrics.ReconcileTotal.WithLabelValues(c.Name, "success").Inc()
 	metricsCtx, _ = tag.New(metricsCtx, tag.Insert(metrics.TagResult, "success"))
 	// Return true, don't take a break
 	return true
@@ -269,12 +262,7 @@ func (c *Controller) InjectFunc(f inject.Func) error {
 	return nil
 }
 
-// updatePromMetrics updates prometheus metrics within the controller
-func (c *Controller) updatePromMetrics(reconcileTime time.Duration) {
-	ctrlmetrics.ReconcileTime.WithLabelValues(c.Name).Observe(reconcileTime.Seconds())
-}
-
-// updateOCMetrics updates OpenCensus metrics within the controller
-func (c *Controller) updateOCMetrics(ctx context.Context, reconcileTime time.Duration) {
+// updateMetrics updates OpenCensus metrics within the controller
+func (c *Controller) updateMetrics(ctx context.Context, reconcileTime time.Duration) {
 	stats.Record(ctx, metrics.MeasureReconcileTime.M(reconcileTime.Seconds()))
 }

@@ -65,9 +65,9 @@ var _ = Describe("controller", func() {
 		informers = &informertest.FakeInformers{}
 		ctrl = &Controller{
 			MaxConcurrentReconciles: 1,
-			Do:                      fakeReconcile,
-			Queue:                   queue,
-			Cache:                   informers,
+			Do:    fakeReconcile,
+			Queue: queue,
+			Cache: informers,
 		}
 		ctrl.InjectFunc(func(interface{}) error { return nil })
 	})
@@ -410,16 +410,7 @@ var _ = Describe("controller", func() {
 			// TODO(community): write this test
 		})
 
-		Context("prometheus metric reconcile_total", func() {
-			var reconcileTotal dto.Metric // Prometheus
-
-			// Prometheus
-			BeforeEach(func() {
-				ctrlmetrics.ReconcileTotal.Reset()
-				reconcileTotal.Reset()
-			})
-
-			// OpenCensus
+		Context("Metric reconcile_total", func() {
 			BeforeEach(func() {
 				view.Register(&view.View{
 					Name:        metrics.MeasureReconcileTotal.Name(),
@@ -429,22 +420,11 @@ var _ = Describe("controller", func() {
 				})
 			})
 
-			// OpenCensus
 			AfterEach(func() {
 				view.Unregister(view.Find(metrics.MeasureReconcileTotal.Name()))
 			})
 
 			It("should get updated on successful reconciliation", func(done Done) {
-				// Prometheus
-				Expect(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "success").Write(&reconcileTotal)
-					if reconcileTotal.GetCounter().GetValue() != 0.0 {
-						return fmt.Errorf("metric reconcile total not reset")
-					}
-					return nil
-				}()).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -464,17 +444,6 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				// Prometheus
-				Eventually(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "success").Write(&reconcileTotal)
-					if actual := reconcileTotal.GetCounter().GetValue(); actual != 1.0 {
-						return fmt.Errorf("metric reconcile total expected: %v and got: %v", 1.0, actual)
-					}
-
-					return nil
-				}, 2.0).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -490,16 +459,6 @@ var _ = Describe("controller", func() {
 			}, 2.0)
 
 			It("should get updated on reconcile errors", func(done Done) {
-				// Prometheus
-				Expect(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "error").Write(&reconcileTotal)
-					if reconcileTotal.GetCounter().GetValue() != 0.0 {
-						return fmt.Errorf("metric reconcile total not reset")
-					}
-					return nil
-				}()).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -520,16 +479,6 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				// Prometheus
-				Eventually(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "error").Write(&reconcileTotal)
-					if actual := reconcileTotal.GetCounter().GetValue(); actual != 1.0 {
-						return fmt.Errorf("metric reconcile total expected: %v and got: %v", 1.0, actual)
-					}
-					return nil
-				}, 2.0).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -545,16 +494,6 @@ var _ = Describe("controller", func() {
 			}, 2.0)
 
 			It("should get updated when reconcile returns with retry enabled", func(done Done) {
-				// Prometheus
-				Expect(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "retry").Write(&reconcileTotal)
-					if reconcileTotal.GetCounter().GetValue() != 0.0 {
-						return fmt.Errorf("metric reconcile total not reset")
-					}
-					return nil
-				}()).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -575,16 +514,6 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				// Prometheus
-				Eventually(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "requeue").Write(&reconcileTotal)
-					if actual := reconcileTotal.GetCounter().GetValue(); actual != 1.0 {
-						return fmt.Errorf("metric reconcile total expected: %v and got: %v", 1.0, actual)
-					}
-					return nil
-				}, 2.0).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -600,16 +529,6 @@ var _ = Describe("controller", func() {
 			}, 2.0)
 
 			It("should get updated when reconcile returns with retryAfter enabled", func(done Done) {
-				// Prometheus
-				Expect(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "retry_after").Write(&reconcileTotal)
-					if reconcileTotal.GetCounter().GetValue() != 0.0 {
-						return fmt.Errorf("metric reconcile total not reset")
-					}
-					return nil
-				}()).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -630,16 +549,6 @@ var _ = Describe("controller", func() {
 				ctrl.Queue.Add(request)
 
 				Expect(<-reconciled).To(Equal(request))
-				// Prometheus
-				Eventually(func() error {
-					ctrlmetrics.ReconcileTotal.WithLabelValues(ctrl.Name, "requeue_after").Write(&reconcileTotal)
-					if actual := reconcileTotal.GetCounter().GetValue(); actual != 1.0 {
-						return fmt.Errorf("metric reconcile total expected: %v and got: %v", 1.0, actual)
-					}
-					return nil
-				}, 2.0).Should(Succeed())
-
-				// OpenCensus
 				Expect(func() error {
 					rows, err := view.RetrieveData(metrics.MeasureReconcileTotal.Name())
 					if err != nil {
@@ -655,7 +564,7 @@ var _ = Describe("controller", func() {
 			}, 2.0)
 		})
 
-		Context("should update prometheus metrics", func() {
+		Context("should update Prometheus metrics", func() {
 			It("should requeue a Request if there is an error and continue processing items", func(done Done) {
 				var reconcileErrs dto.Metric
 				ctrlmetrics.ReconcileErrors.Reset()
