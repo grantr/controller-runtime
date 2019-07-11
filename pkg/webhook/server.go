@@ -27,8 +27,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/inject"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/metrics"
 )
 
 const (
@@ -103,8 +105,13 @@ func (s *Server) Register(path string, hook http.Handler) {
 // instrumentedHook adds some instrumentation on top of the given webhook.
 func instrumentedHook(path string, hookRaw http.Handler) http.Handler {
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+		// Create a context used for tagging OpenCensus measurements.
+		metricsCtx, _ := tag.New(context.Background(),
+			tag.Insert(metrics.TagWebhook, path),
+		)
+
 		startTS := time.Now()
-		defer func() { metrics.RequestLatency.WithLabelValues(path).Observe(time.Now().Sub(startTS).Seconds()) }()
+		defer func() { stats.Record(metricsCtx, metrics.MeasureRequestLatency.M(time.Now().Sub(startTS).Seconds())) }()
 		hookRaw.ServeHTTP(resp, req)
 
 		// TODO(directxman12): add back in metric about total requests broken down by result?

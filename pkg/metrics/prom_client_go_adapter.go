@@ -17,10 +17,12 @@ limitations under the License.
 package metrics
 
 import (
+	"context"
 	"net/url"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 	reflectormetrics "k8s.io/client-go/tools/cache"
 	clientmetrics "k8s.io/client-go/tools/metrics"
 	workqueuemetrics "k8s.io/client-go/util/workqueue"
@@ -33,21 +35,17 @@ import (
 var (
 	// client metrics
 
-	requestLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "rest_client_request_latency_seconds",
-			Help:    "Request latency in seconds. Broken down by verb and URL.",
-			Buckets: prometheus.ExponentialBuckets(0.001, 2, 10),
-		},
-		[]string{"verb", "url"},
+	// MeasureRequestLatency ...
+	MeasureRequestLatency = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/rest_client_request_latency_seconds",
+		"Request latency in seconds",
+		"s",
 	)
 
-	requestResult = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "rest_client_requests_total",
-			Help: "Number of HTTP requests, partitioned by status code, method, and host.",
-		},
-		[]string{"code", "method", "host"},
+	MeasureRequestResult = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/rest_client_requests_total",
+		"Number of HTTP requests",
+		stats.UnitNone,
 	)
 
 	// reflector metrics
@@ -55,149 +53,127 @@ var (
 	// TODO(directxman12): update these to be histograms once the metrics overhaul KEP
 	// PRs start landing.
 
-	reflectorSubsystem = "reflector"
+	MeasureListsTotal = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_lists_total",
+		"Total number of API lists done by the reflectors",
+		stats.UnitNone,
+	)
 
-	listsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "lists_total",
-		Help:      "Total number of API lists done by the reflectors",
-	}, []string{"name"})
+	MeasureListsDuration = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_list_duration_seconds",
+		"How long an API list takes to return and decode for the reflectors",
+		stats.UnitNone,
+	)
 
-	listsDuration = prometheus.NewSummaryVec(prometheus.SummaryOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "list_duration_seconds",
-		Help:      "How long an API list takes to return and decode for the reflectors",
-	}, []string{"name"})
+	// MeasureItemsPerList ... this must be a float due to the interface of SummaryMetric
+	MeasureItemsPerList = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_items_per_list",
+		"How many items an API list returns to the reflectors",
+		stats.UnitNone,
+	)
 
-	itemsPerList = prometheus.NewSummaryVec(prometheus.SummaryOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "items_per_list",
-		Help:      "How many items an API list returns to the reflectors",
-	}, []string{"name"})
+	MeasureWatchesTotal = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_watches_total",
+		"Total number of API watches done by the reflectors",
+		stats.UnitNone,
+	)
 
-	watchesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "watches_total",
-		Help:      "Total number of API watches done by the reflectors",
-	}, []string{"name"})
+	MeasureShortWatchesTotal = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_short_watches_total",
+		"Total number of short API watches done by the reflectors",
+		stats.UnitNone,
+	)
 
-	shortWatchesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "short_watches_total",
-		Help:      "Total number of short API watches done by the reflectors",
-	}, []string{"name"})
+	MeasureWatchDuration = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_watch_duration_seconds",
+		"How long an API watch takes to return and decode for the reflectors",
+		stats.UnitNone,
+	)
 
-	watchDuration = prometheus.NewSummaryVec(prometheus.SummaryOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "watch_duration_seconds",
-		Help:      "How long an API watch takes to return and decode for the reflectors",
-	}, []string{"name"})
+	// MeasureItemsPerWatch ... this must be a float due to the interface of SummaryMetric
+	MeasureItemsPerWatch = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_items_per_watch",
+		"How many items an API watch returns to the reflectors",
+		stats.UnitNone,
+	)
 
-	itemsPerWatch = prometheus.NewSummaryVec(prometheus.SummaryOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "items_per_watch",
-		Help:      "How many items an API watch returns to the reflectors",
-	}, []string{"name"})
-
-	lastResourceVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Subsystem: reflectorSubsystem,
-		Name:      "last_resource_version",
-		Help:      "Last resource version seen for the reflectors",
-	}, []string{"name"})
+	// MeasureLastResourceVersion ... this must be a float due to the interface of SettableGaugeMetric
+	MeasureLastResourceVersion = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/reflector_last_resource_version",
+		"Last resource version seen for the reflectors",
+		stats.UnitNone,
+	)
 
 	// workqueue metrics
 
-	workQueueSubsystem = "workqueue"
+	MeasureDepth = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_depth",
+		"Current depth of workqueue",
+		stats.UnitNone,
+	)
 
-	depth = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "depth",
-		Help:      "Current depth of workqueue",
-	}, []string{"name"})
+	MeasureAdds = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_adds_total",
+		"Total number of adds handled by workqueue",
+		stats.UnitNone,
+	)
 
-	adds = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "adds_total",
-		Help:      "Total number of adds handled by workqueue",
-	}, []string{"name"})
+	MeasureLatency = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_queue_latency_seconds",
+		"How long in seconds an item stays in workqueue before being requested.",
+		"s",
+	)
 
-	latency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "queue_latency_seconds",
-		Help:      "How long in seconds an item stays in workqueue before being requested.",
-		Buckets:   prometheus.ExponentialBuckets(10e-9, 10, 10),
-	}, []string{"name"})
+	MeasureWorkDuration = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_work_duration_seconds",
+		"How long in seconds processing an item from workqueue takes.",
+		"s",
+	)
 
-	workDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "work_duration_seconds",
-		Help:      "How long in seconds processing an item from workqueue takes.",
-		Buckets:   prometheus.ExponentialBuckets(10e-9, 10, 10),
-	}, []string{"name"})
+	MeasureRetries = stats.Int64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_retries_total",
+		"Total number of retries handled by workqueue",
+		"s",
+	)
 
-	retries = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "retries_total",
-		Help:      "Total number of retries handled by workqueue",
-	}, []string{"name"})
+	MeasureLongestRunning = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_longest_running_processor_microseconds",
+		"How many microseconds has the longest running processor for workqueue been running.",
+		"us",
+	)
 
-	longestRunning = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "longest_running_processor_microseconds",
-		Help: "How many microseconds has the longest running " +
-			"processor for workqueue been running.",
-	}, []string{"name"})
+	MeasureUnfinishedWork = stats.Float64(
+		"sigs.kubernetes.io/controller-runtime/measures/workqueue_unfinished_work_seconds",
+		"How many seconds of work has done that is in progress and hasn't been observed "+
+			"by work_duration. Large values indicate stuck threads. One can deduce the "+
+			"number of stuck threads by observing the rate at which this increases.",
+		"s",
+	)
 
-	unfinishedWork = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Subsystem: workQueueSubsystem,
-		Name:      "unfinished_work_seconds",
-		Help: "How many seconds of work has done that " +
-			"is in progress and hasn't been observed by work_duration. Large " +
-			"values indicate stuck threads. One can deduce the number of stuck " +
-			"threads by observing the rate at which this increases.",
-	}, []string{"name"})
+	TagVerb = mustNewTagKey("verb")
+
+	TagURL = mustNewTagKey("url")
+
+	TagCode = mustNewTagKey("code")
+
+	TagMethod = mustNewTagKey("method")
+
+	TagHost = mustNewTagKey("host")
+
+	TagName = mustNewTagKey("name")
 )
 
+func mustNewTagKey(k string) tag.Key {
+	tagKey, err := tag.NewKey(k)
+	if err != nil {
+		panic(err)
+	}
+	return tagKey
+}
+
 func init() {
-	registerClientMetrics()
-	registerReflectorMetrics()
-	registerWorkqueueMetrics()
-}
-
-// registerClientMetrics sets up the client latency metrics from client-go
-func registerClientMetrics() {
-	// register the metrics with our registry
-	Registry.MustRegister(requestLatency)
-	Registry.MustRegister(requestResult)
-
-	// register the metrics with client-go
-	clientmetrics.Register(&latencyAdapter{metric: requestLatency}, &resultAdapter{metric: requestResult})
-}
-
-// registerReflectorMetrics sets up reflector (reconile) loop metrics
-func registerReflectorMetrics() {
-	Registry.MustRegister(listsTotal)
-	Registry.MustRegister(listsDuration)
-	Registry.MustRegister(itemsPerList)
-	Registry.MustRegister(watchesTotal)
-	Registry.MustRegister(shortWatchesTotal)
-	Registry.MustRegister(watchDuration)
-	Registry.MustRegister(itemsPerWatch)
-	Registry.MustRegister(lastResourceVersion)
-
+	clientmetrics.Register(&latencyAdapter{metric: MeasureRequestLatency}, &resultAdapter{metric: MeasureRequestResult})
 	reflectormetrics.SetReflectorMetricsProvider(reflectorMetricsProvider{})
-}
-
-// registerWorkQueueMetrics sets up workqueue (other reconcile) metrics
-func registerWorkqueueMetrics() {
-	Registry.MustRegister(depth)
-	Registry.MustRegister(adds)
-	Registry.MustRegister(latency)
-	Registry.MustRegister(workDuration)
-	Registry.MustRegister(retries)
-	Registry.MustRegister(longestRunning)
-	Registry.MustRegister(unfinishedWork)
-
 	workqueuemetrics.SetProvider(workqueueMetricsProvider{})
 }
 
@@ -210,57 +186,116 @@ func registerWorkqueueMetrics() {
 // (which isn't anywhere in an easily-importable place).
 
 type latencyAdapter struct {
-	metric *prometheus.HistogramVec
+	metric *stats.Float64Measure
 }
 
-func (l *latencyAdapter) Observe(verb string, u url.URL, latency time.Duration) {
-	l.metric.WithLabelValues(verb, u.String()).Observe(latency.Seconds())
+func (a *latencyAdapter) Observe(verb string, u url.URL, latency time.Duration) {
+	ctx, _ := tag.New(context.Background(),
+		tag.Insert(TagVerb, verb),
+		tag.Insert(TagURL, u.String()),
+	)
+	stats.Record(ctx, a.metric.M(latency.Seconds()))
 }
 
 type resultAdapter struct {
-	metric *prometheus.CounterVec
+	metric *stats.Int64Measure
 }
 
-func (r *resultAdapter) Increment(code, method, host string) {
-	r.metric.WithLabelValues(code, method, host).Inc()
+func (a *resultAdapter) Increment(code, method, host string) {
+	ctx, _ := tag.New(context.Background(),
+		tag.Insert(TagCode, code),
+		tag.Insert(TagMethod, method),
+		tag.Insert(TagHost, host),
+	)
+	stats.Record(ctx, a.metric.M(1))
 }
 
 // Reflector metrics provider (method #2 for client-go metrics),
 // copied (more-or-less directly) from k8s.io/kubernetes setup code
 // (which isn't anywhere in an easily-importable place).
 
+type intMetric struct {
+	mutators []tag.Mutator
+	measure  *stats.Int64Measure
+}
+
+func (m intMetric) Inc() {
+	stats.RecordWithTags(context.Background(), m.mutators, m.measure.M(1))
+}
+
+func (m intMetric) Dec() {
+	stats.RecordWithTags(context.Background(), m.mutators, m.measure.M(-1))
+}
+
+type floatMetric struct {
+	mutators []tag.Mutator
+	measure  *stats.Float64Measure
+}
+
+func (m floatMetric) Observe(v float64) {
+	stats.RecordWithTags(context.Background(), m.mutators, m.measure.M(v))
+}
+
+func (m floatMetric) Set(v float64) {
+	m.Observe(v)
+}
+
 type reflectorMetricsProvider struct{}
 
 func (reflectorMetricsProvider) NewListsMetric(name string) reflectormetrics.CounterMetric {
-	return listsTotal.WithLabelValues(name)
+	return intMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureListsTotal,
+	}
 }
 
 func (reflectorMetricsProvider) NewListDurationMetric(name string) reflectormetrics.SummaryMetric {
-	return listsDuration.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureListsDuration,
+	}
 }
 
 func (reflectorMetricsProvider) NewItemsInListMetric(name string) reflectormetrics.SummaryMetric {
-	return itemsPerList.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureItemsPerList,
+	}
 }
 
 func (reflectorMetricsProvider) NewWatchesMetric(name string) reflectormetrics.CounterMetric {
-	return watchesTotal.WithLabelValues(name)
+	return intMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureWatchesTotal,
+	}
 }
 
 func (reflectorMetricsProvider) NewShortWatchesMetric(name string) reflectormetrics.CounterMetric {
-	return shortWatchesTotal.WithLabelValues(name)
+	return intMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureShortWatchesTotal,
+	}
 }
 
 func (reflectorMetricsProvider) NewWatchDurationMetric(name string) reflectormetrics.SummaryMetric {
-	return watchDuration.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureWatchDuration,
+	}
 }
 
 func (reflectorMetricsProvider) NewItemsInWatchMetric(name string) reflectormetrics.SummaryMetric {
-	return itemsPerWatch.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureItemsPerWatch,
+	}
 }
 
 func (reflectorMetricsProvider) NewLastResourceVersionMetric(name string) reflectormetrics.GaugeMetric {
-	return lastResourceVersion.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureLastResourceVersion,
+	}
 }
 
 // Workqueue metrics (method #3 for client-go metrics),
@@ -271,29 +306,50 @@ func (reflectorMetricsProvider) NewLastResourceVersionMetric(name string) reflec
 type workqueueMetricsProvider struct{}
 
 func (workqueueMetricsProvider) NewDepthMetric(name string) workqueuemetrics.GaugeMetric {
-	return depth.WithLabelValues(name)
+	return intMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureDepth,
+	}
 }
 
 func (workqueueMetricsProvider) NewAddsMetric(name string) workqueuemetrics.CounterMetric {
-	return adds.WithLabelValues(name)
+	return intMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureAdds,
+	}
 }
 
 func (workqueueMetricsProvider) NewLatencyMetric(name string) workqueuemetrics.SummaryMetric {
-	return latency.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureLatency,
+	}
 }
 
 func (workqueueMetricsProvider) NewWorkDurationMetric(name string) workqueuemetrics.SummaryMetric {
-	return workDuration.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureWorkDuration,
+	}
 }
 
 func (workqueueMetricsProvider) NewRetriesMetric(name string) workqueuemetrics.CounterMetric {
-	return retries.WithLabelValues(name)
+	return intMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureRetries,
+	}
 }
 
 func (workqueueMetricsProvider) NewLongestRunningProcessorMicrosecondsMetric(name string) workqueuemetrics.SettableGaugeMetric {
-	return longestRunning.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureLongestRunning,
+	}
 }
 
 func (workqueueMetricsProvider) NewUnfinishedWorkSecondsMetric(name string) workqueuemetrics.SettableGaugeMetric {
-	return unfinishedWork.WithLabelValues(name)
+	return floatMetric{
+		mutators: []tag.Mutator{tag.Insert(TagName, name)},
+		measure:  MeasureUnfinishedWork,
+	}
 }

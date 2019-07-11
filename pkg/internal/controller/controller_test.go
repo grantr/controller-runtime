@@ -409,6 +409,31 @@ var _ = Describe("controller", func() {
 			// TODO(community): write this test
 		})
 
+		// EventuallyEmptyView waits until the view is empty. This helps avoid
+		// issues with OpenCensus' asynchronous view register and unregister.
+		EventuallyEmptyView := func(name string) {
+			Eventually(func() error {
+				rows, err := view.RetrieveData(name)
+				if err != nil {
+					return err
+				}
+				if len(rows) > 0 {
+					return fmt.Errorf("View %s has data, expected none", name)
+				}
+				return nil
+			}, 1.0).Should(Succeed())
+		}
+
+		EventuallyUnregisterView := func(name string) {
+			view.Unregister(view.Find(name))
+			Eventually(func() error {
+				if view.Find(name) != nil {
+					return fmt.Errorf("View %s is registered, expected unregistered", name)
+				}
+				return nil
+			}, 1.0).Should(Succeed())
+		}
+
 		Context("Measure reconcile_total", func() {
 			It("should get updated on successful reconciliation", func(done Done) {
 				view.Register(&view.View{
@@ -417,6 +442,7 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
+				EventuallyEmptyView("successful_reconciliation")
 
 				go func() {
 					defer GinkgoRecover()
@@ -437,7 +463,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
-				view.Unregister(view.Find("successful_reconciliation"))
+				EventuallyUnregisterView("successful_reconciliation")
 
 				close(done)
 			}, 2.0)
@@ -449,6 +475,7 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
+				EventuallyEmptyView("total_reconcile_error")
 
 				fakeReconcile.Err = fmt.Errorf("expected error: reconcile")
 				go func() {
@@ -470,7 +497,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
-				view.Unregister(view.Find("total_reconcile_error"))
+				EventuallyUnregisterView("total_reconcile_error")
 
 				close(done)
 			}, 2.0)
@@ -482,6 +509,7 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
+				EventuallyEmptyView("reconcile_retry")
 
 				fakeReconcile.Result.Requeue = true
 				go func() {
@@ -503,7 +531,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
-				view.Unregister(view.Find("reconcile_retry"))
+				EventuallyUnregisterView("reconcile_retry")
 
 				close(done)
 			}, 2.0)
@@ -515,6 +543,7 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController, metrics.TagResult},
 				})
+				EventuallyEmptyView("reconcile_retry_after")
 
 				fakeReconcile.Result.RequeueAfter = 5 * time.Hour
 				go func() {
@@ -536,7 +565,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
-				view.Unregister(view.Find("reconcile_retry_after"))
+				EventuallyUnregisterView("reconcile_retry_after")
 
 				close(done)
 			}, 2.0)
@@ -551,6 +580,7 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController},
 				})
+				EventuallyEmptyView("reconcile_errors")
 
 				fakeReconcile.Err = fmt.Errorf("expected error: reconcile")
 				go func() {
@@ -593,7 +623,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}()).Should(Succeed())
-				view.Unregister(view.Find("reconcile_errors"))
+				EventuallyUnregisterView("reconcile_errors")
 
 				close(done)
 			}, 2.0)
@@ -607,6 +637,7 @@ var _ = Describe("controller", func() {
 					Aggregation: view.Count(),
 					TagKeys:     []tag.Key{metrics.TagController},
 				})
+				EventuallyEmptyView("reconcile_time")
 
 				go func() {
 					defer GinkgoRecover()
@@ -630,7 +661,7 @@ var _ = Describe("controller", func() {
 					Expect(rows[0].Tags).To(ContainElement(tag.Tag{Key: metrics.TagController, Value: "foo"}))
 					return nil
 				}, 2.0).Should(Succeed())
-				view.Unregister(view.Find("reconcile_time"))
+				EventuallyUnregisterView("reconcile_time")
 
 				close(done)
 			}, 4.0)
